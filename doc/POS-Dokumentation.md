@@ -37,6 +37,11 @@ Armee von Zombies ankämpft.
 | 26.5.26   | Player Health +  Zombie animation    | Shane         | 100%      |
 |           |                                      |(nit gepusht)  |           |
 |------------------------------------------------------------------------------|
+| 1.5.26    | Defender images +  Defender classe   | Felix         | 100%      |
+|------------------------------------------------------------------------------|
+| 3.5.26    | Rocketguy+ Sniper + Economy          | Felix         | 100%      |
+|------------------------------------------------------------------------------|
+
 
 ## Leistungsverzeichnis (Kurzbeschreibung, Funktionsumfang, Skizzen)
 
