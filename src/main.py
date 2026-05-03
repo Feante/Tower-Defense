@@ -1,15 +1,16 @@
-import pygame as pg
 import os
+import warnings
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "1"
+warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*avx2.*")
+import pygame as pg
 from pygame.draw import circle
 from submodule import *
-from Defender import *
+from Defender import DefenderAssets, PistolDefender, RocketDefender, SniperDefender, Defendgui, Defend_1, Defend_2, Defend_3
 
 # ____SETUP____
 pg.init()
 WIDTH,HEIGHT =  1536,1024
 screen = pg.display.set_mode((WIDTH, HEIGHT))
-load_defender_assets()
-load_bullet_assets()
 clock = pg.time.Clock()
 script_dir = os.path.dirname(__file__)
 bg_path = os.path.join(script_dir, "assets", "Background.jpg")
@@ -64,8 +65,7 @@ ROAD_PATH = [
     (1175,150),
     (1205,50)
 ]
-Defenders = []
-
+defenders = []
 # ___Colours___
 white = (255, 255, 255)
 red = (255, 0, 0)
@@ -76,6 +76,7 @@ brown = (181, 122, 0)
 
 # ___INSTANTIATE___
 health_pl = 200
+money = 500
 attackers = []
 spawn_queue = 0
 current_round = 0
@@ -85,9 +86,13 @@ last_spawn_time = 0
 spawn_delay = 100  # 100 milliseconds between spawns
 drag_offset = pg.math.Vector2(0,0)
 bullets = []
-last_shot_time = 0
+rockets = []
+sniper_bullets = []
+last_shot_time_p = 0
+last_shot_time_r = 0
 rect_gui = pg.Rect(1468,0,200,1024)
 dragging = False
+dragging_type = None
 running = True
 i = 2
 
@@ -102,15 +107,55 @@ while running:
         elif event.type == pg.MOUSEBUTTONDOWN:
             if event.button == 1:
                 mouse_pos = pg.math.Vector2(event.pos)
-                if rect_gui.collidepoint(event.pos) and (mouse_pos - circle_def).length() <= 40:
-                    dragging = True
-                    drag_offset = mouse_pos - circle_def
+                if rect_gui.collidepoint(event.pos):
+                    # Check distance to pistol guy (1468 + 34, 60)
+                    pistol_center = pg.math.Vector2(1468 + 34, 60)
+                    # Check distance to rocket guy (1468 + 34, 160)
+                    rocket_center = pg.math.Vector2(1468 + 34, 160)
+                    
+                    if (mouse_pos - pistol_center).length() <= 40:
+                        dragging = True
+                        dragging_type = "pistol"
+                        circle_def = pistol_center.copy()
+                        drag_offset = mouse_pos - pistol_center
+                    elif (mouse_pos - rocket_center).length() <= 40:
+                        dragging = True
+                        dragging_type = "rocket"
+                        circle_def = rocket_center.copy()
+                        drag_offset = mouse_pos - rocket_center
+                    else:
+                        # Check distance to sniper (1468 + 34, 260)
+                        sniper_center = pg.math.Vector2(1468 + 34, 260)
+                        if (mouse_pos - sniper_center).length() <= 40:
+                            dragging = True
+                            dragging_type = "sniper"
+                            circle_def = sniper_center.copy()
+                            drag_offset = mouse_pos - sniper_center
         elif event.type == pg.MOUSEBUTTONUP:
             if event.button == 1 and dragging:
-                if not rect_gui.collidepoint(pg.mouse.get_pos()):
-                    Defenders.append(circle_def.copy())
+                # Check if placement is within the GUI area
+                mouse_x = pg.mouse.get_pos()[0]
+                if 1468 <= mouse_x <= 1668:
+                    # Placement would be inside GUI - reject
+                    pass
+                else:
+                    # Placement is valid - instantiate based on what was dragged
+                    if dragging_type == "pistol":
+                        if money >= 100:
+                            defenders.append(PistolDefender(circle_def.copy()))
+                            money -= 100
+                    elif dragging_type == "rocket":
+                        if money >= 250:
+                            defenders.append(RocketDefender(circle_def.copy()))
+                            money -= 250
+                    elif dragging_type == "sniper":
+                        if money >= 500:
+                            defenders.append(SniperDefender(circle_def.copy()))
+                            money -= 500
                 dragging = False
+                dragging_type = None
                 circle_def = CIRCLE_ORIGIN.copy()
+    
     
     # ___LOGIC___
     # Spawn attackers from queue
@@ -128,6 +173,8 @@ while running:
             health_pl -= 2
             attacker.alive = False
         if not attacker.alive:
+            if attacker.current_point_idx < len(attacker.path):
+                money += 20
             attackers.remove(attacker)
     
     # Update bullets
@@ -135,22 +182,28 @@ while running:
         bullet.update()
         if not bullet.active:
             bullets.remove(bullet)
+    for rocket in rockets[:]:
+        rocket.update(attackers)
+        if not rocket.active:
+            rockets.remove(rocket)
+    for sb in sniper_bullets[:]:
+        sb.update()
+        if not sb.active:
+            sniper_bullets.remove(sb)
             
     # Defenders shoot
     current_time = pg.time.get_ticks()
-    if current_time - last_shot_time > 500: # Every 0.5 seconds
-        for def_pos in Defenders:
-            # Find a target in range
-            target = None
-            for enemy in attackers:
-                if enemy.alive and (def_pos - enemy.pos).length() < 100:
-                    target = enemy
-                    break # Just target the first one in range
-            
-            if target:
-                bullets.append(Bullet(def_pos, target))
-        last_shot_time = current_time
-
+    for defender in defenders:
+        target = defender.update(current_time, attackers)
+        if target:
+            if defender.type == "pistol":
+                bullets.append(Bullet(defender.pos, target))
+            elif defender.type == "rocket":
+                rockets.append(Rocket(defender.pos, target))
+            elif defender.type == "sniper":
+                sniper_bullets.append(SniperBullet(defender.pos, target))
+        last_shot_time_p = current_time
+   
     # Round progression
     if not attackers and spawn_queue == 0:
         if i == 0:
@@ -175,23 +228,46 @@ while running:
         circle_def.x = pg.mouse.get_pos()[0] - drag_offset.x
         circle_def.y = pg.mouse.get_pos()[1] - drag_offset.y
 
-    #___Loose_Health__ 
-    
-
     # ___RENDER___
     screen.blit(background, (0, 0))
-    # Draw placed defenders
-    for def_pos in Defenders:
-        draw_range(screen, def_pos)
-        Defend_1(screen, red, def_pos)
+    # Draw placed defenders - two passes so icons are always above range circles
+    for defender in defenders:
+        defender.draw_range(screen)
+    for defender in defenders:
+        defender.draw_sprite(screen)
+
     # Draw Health and Round
     draw_text(f"Health: {health_pl}", 10, 5,font,screen)
+    draw_text(f"Money: {money}", 10, 35, font, screen, (255, 215, 0))
     draw_text(f"Round: {current_round}", 200, 5,font,screen)
     # Draw bullets
     for bullet in bullets:
         bullet.draw(screen)
+    for rocket in rockets:
+        rocket.draw(screen)
+    for sb in sniper_bullets:
+        sb.draw(screen)
         
     Defendgui(1468, 0, 200, 1024, screen, brown, red, circle_def)
+    
+    # Draw tower costs
+    draw_text("$100", 1468 + 70, 48, font, screen, (255, 215, 0))
+    draw_text("$250", 1468 + 70, 148, font, screen, (255, 215, 0))
+    draw_text("$500", 1468 + 70, 248, font, screen, (255, 215, 0))
+    
+    if dragging:
+        if dragging_type != "sniper":
+            range_val = 100 if dragging_type == "pistol" else 500
+            range_surf = pg.Surface((range_val * 2, range_val * 2), pg.SRCALPHA)
+            pg.draw.circle(range_surf, (150, 150, 150, 60), (range_val, range_val), range_val)
+            screen.blit(range_surf, (int(circle_def.x) - range_val, int(circle_def.y) - range_val))
+        if dragging_type == "pistol":
+            Defend_1(screen, red, circle_def)
+        elif dragging_type == "rocket":
+            Defend_2(screen, red, circle_def)
+        elif dragging_type == "sniper":
+            Defend_3(screen, red, circle_def)
+            
     # Draw all attackers
     for attacker in attackers:
         attacker.draw(screen, current_zombie_image)
